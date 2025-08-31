@@ -1,0 +1,10 @@
+'!TITLE "Robot program"
+
+Sub Main
+	TakeArm Keep = 0
+	
+	Move P, P71
+
+	Givearm
+
+End Sub

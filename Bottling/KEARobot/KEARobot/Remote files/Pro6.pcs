@@ -1,0 +1,72 @@
+'!TITLE "Palletizing with Turntable (4xA first, then 4xB)"
+
+#Define PLT_ROWS 2
+#Define PLT_COLS 2
+#Define PLT_HEIGHT 20
+#Define PLT_APR_LEN 50
+#Define PLT_DEP_LEN 50
+#Define PLT_LAYER 2
+
+#Define PLT_P1 71
+#Define PLT_P2 72
+#Define PLT_P3 73
+#Define PLT_P4 74
+
+#Define PLT_POS 52
+#Define PLT_PICKUP 75
+
+#Define PLT_COUNTER 32         ' 1¨C4 position counter within layer
+#Define PLT_LAYER_COUNTER 33   ' 1 = layer 1, 2 = layer 2
+#Define HOME 10                ' Home position is P[10]
+
+
+Sub Main()
+
+    TakeArm Keep = 0
+
+   ' ---- Move to pickup point ----
+    Approach P, P[PLT_PICKUP], PLT_APR_LEN, S = 100
+    Move L, @0 P[PLT_PICKUP], S = 40
+
+    ' ---- Wait for correct material ----
+    If I[PLT_LAYER_COUNTER] = 1 Then
+        Wait IO552 = 1   ' Wait for A
+    Else
+        Wait IO553 = 1   ' Wait for B
+    End If
+
+    ' ---- Pick ----
+    Set IO64 = 0
+	Set IO65 = 1
+    Delay 1000
+    Depart L, PLT_DEP_LEN, S = 40
+
+    ' ---- Calculate pallet position ----
+    P[PLT_POS] = Pallet.CalcPos(PLT_ROWS, PLT_COLS, PLT_HEIGHT, P[PLT_P1], P[PLT_P2], P[PLT_P3], P[PLT_P4], I[PLT_COUNTER], I[PLT_LAYER_COUNTER])
+
+    ' ---- Move to pallet ----
+    Approach P, P[PLT_POS], PLT_APR_LEN, S = 100
+    Move L, @0 P[PLT_POS], S = 40
+
+    ' ---- Place ----
+    Set IO64 = 1
+	Set IO65 = 0
+    Delay 1000
+    Depart L, PLT_DEP_LEN, S = 40
+
+    ' ---- Update counter and switch PLT_LAYER_COUNTER if needed ----
+    I[PLT_COUNTER] = I[PLT_COUNTER] + 1
+
+    If I[PLT_COUNTER] > (PLT_ROWS * PLT_COLS) Then
+        I[PLT_COUNTER] = 1
+
+        If I[PLT_LAYER_COUNTER] = 1 Then
+            I[PLT_LAYER_COUNTER] = 2
+            PrintDbg "Finished placing A. Now wait for B."
+        Else
+            I[PLT_LAYER_COUNTER] = 1
+            PrintDbg "Finished A+B. Starting new pallet."
+        End If
+    End If
+
+End Sub

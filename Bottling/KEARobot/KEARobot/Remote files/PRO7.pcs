@@ -1,0 +1,67 @@
+'!TITLE "De-Palletizing Template (2x2x2, Top-Down)"
+
+#Define PLT_ROWS 2
+#Define PLT_COLS 2
+#Define PLT_HEIGHT 20
+#Define PLT_APR_LEN 50
+#Define PLT_DEP_LEN 50
+#Define PLT_LAYER 2
+
+#Define PLT_P1 71
+#Define PLT_P2 72
+#Define PLT_P3 73
+#Define PLT_P4 74
+
+#Define PLT_POS 51
+#Define PLT_DROPOFF 75
+
+#Define PLT_COUNTER 30
+#Define PLT_LAYER_COUNTER 31
+#Define HOME 10
+
+
+' --------------------------
+' De-Palletizing
+' --------------------------
+Sub Main()
+
+    TakeArm Keep = 0
+
+    ' ---- Calculate current pallet position ----
+    P[PLT_POS] = Pallet.CalcPos(PLT_ROWS, PLT_COLS, PLT_HEIGHT, P[PLT_P1], P[PLT_P2], P[PLT_P3], P[PLT_P4], I[PLT_COUNTER], I[PLT_LAYER_COUNTER])
+
+    ' ---- Go to pick position ----
+    Approach P, P[PLT_POS], @0 PLT_APR_LEN, S = 100
+    Move L, @0 P[PLT_POS], S = 40
+
+    ' ---- Pick (vacuum ON) ----
+    Set IO64 = 0
+	Set IO65 = 1
+    Delay 500
+    Depart L, PLT_DEP_LEN, S = 40
+
+    ' ---- Move to drop-off ----
+    Approach P, P[PLT_DROPOFF], PLT_APR_LEN, S = 100
+    Move L, @0 P[PLT_DROPOFF], S = 80
+
+    ' ---- Release (vacuum OFF) ----
+	Wait IO554 = 1 ' Wait for the bottle sensor ON
+    Set IO64 = 1
+	Set IO65 = 0
+    Delay 500
+    Depart L, PLT_DEP_LEN, S = 40
+
+    ' ---- Update counters ----
+    I[PLT_COUNTER] = I[PLT_COUNTER] + 1
+
+    If I[PLT_COUNTER] > (PLT_ROWS * PLT_COLS) Then
+        I[PLT_COUNTER] = 1
+        I[PLT_LAYER_COUNTER] = I[PLT_LAYER_COUNTER] - 1
+
+        If I[PLT_LAYER_COUNTER] < 1 Then
+            PrintDbg "De-palletizing complete. Restarting from top layer."
+            I[PLT_LAYER_COUNTER] = PLT_LAYER
+        End If
+    End If
+
+End Sub

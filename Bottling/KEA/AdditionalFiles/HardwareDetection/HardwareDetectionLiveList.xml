@@ -1,0 +1,14 @@
+<OnlineDevices>
+  <OnlineDevice VendorID="260" DeviceID="801" TypeID="2600801" DeviceType="PROFINET IO-Device">
+    <DeviceRole>Device</DeviceRole>
+    <NameOfStation>rc8pns</NameOfStation>
+    <MacAddress>00-02-A2-31-60-D9</MacAddress>
+    <IPAddress>192.168.0.130</IPAddress>
+  </OnlineDevice>
+  <OnlineDevice VendorID="12F" DeviceID="12A" TypeID="12F012A" DeviceType="IMPACT67 Pro PN DIO">
+    <DeviceRole>Device</DeviceRole>
+    <NameOfStation>impact67-pro</NameOfStation>
+    <MacAddress>00-0F-9E-BE-72-20</MacAddress>
+    <IPAddress>192.168.0.15</IPAddress>
+  </OnlineDevice>
+</OnlineDevices>

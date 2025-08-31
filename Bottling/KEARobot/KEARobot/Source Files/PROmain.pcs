@@ -1,0 +1,190 @@
+'!TITLE "Main Task Dispatcher"
+' --- Shared pallet layout ---
+#Define PLT_ROWS 2         ' Number of rows in the pallet grid
+#Define PLT_COLS 2         ' Number of columns in the pallet grid
+#Define PLT_HEIGHT 20      ' Height difference between layers (mm)
+#Define PLT_APR_LEN 50     ' Distance used for robot approach movements (mm)
+#Define PLT_DEP_LEN 50     ' Distance used for robot depart movements (mm)
+#Define PLT_LAYER 2        ' Total number of pallet layers
+#Define HOME P[10]         ' Predefined HOME position of the robot
+
+' --- DePalletizing Variables ---
+#Define DPLT_P1 71         ' Corner point 1 of DePalletizing pallet
+#Define DPLT_P2 72         ' Corner point 2 of DePalletizing pallet
+#Define DPLT_P3 73         ' Corner point 3 of DePalletizing pallet
+#Define DPLT_P4 74         ' Corner point 4 of DePalletizing pallet
+#Define DPLT_POS 51        ' Calculated position for picking bottle
+#Define DPLT_DROPOFF 75    ' Fixed drop-off position near filling machine
+#Define DPLT_COUNTER 30    ' Bottle counter for current layer (1 to ROWS*COLS)
+#Define DPLT_LAYER_COUNTER 31 ' Layer counter (top-down, from 2 to 1)
+
+' --- Palletizing Variables ---
+#Define PPLT_P1 81         ' Corner point 1 of Palletizing pallet
+#Define PPLT_P2 82         ' Corner point 2 of Palletizing pallet
+#Define PPLT_P3 83         ' Corner point 3 of Palletizing pallet
+#Define PPLT_P4 84         ' Corner point 4 of Palletizing pallet
+#Define PPLT_POS 52        ' Calculated target position to place bottle
+#Define PPLT_PICKUP 85     ' Fixed position to pick bottle before placing
+#Define PPLT_COUNTER 32    ' Bottle counter for current layer
+#Define PPLT_LAYER_COUNTER 33 ' Layer counter for alternating between bottle types (1 = A, 2 = B)
+
+' Additional signals from PLC (Boolean input)
+#Define FILLING_AUTO I[40] ' Boolean input from PLC: 1 = run DePalletizing, 0 = stop
+#Define MODE_SELECT I[50]  ' Mode selector input from PLC: 1 = DePalletizing, 2 = Palletizing
+
+
+Sub Main()
+  TakeArm Keep = 0  
+  If I[MODE_SELECT] = 1 Then
+    PrintDbg "Running De-Palletizing"
+    Call DePalletizing_Main
+  ElseIf I[MODE_SELECT] = 2 Then
+    PrintDbg "Running Palletizing"
+    Call Palletizing_Main
+  Else
+    PrintDbg "No valid mode selected. Waiting..."
+  End If
+End Sub
+
+Sub DePalletizing_Main()
+
+  TakeArm Keep = 0
+
+  ' Check at start
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto is OFF at start. Returning to HOME."
+    Return
+  End If
+
+  ' Calculate current pallet position
+  P[DPLT_POS] = Pallet.CalcPos(PLT_ROWS, PLT_COLS, PLT_HEIGHT, P[DPLT_P1], P[DPLT_P2], P[DPLT_P3], P[DPLT_P4], I[DPLT_COUNTER], I[DPLT_LAYER_COUNTER])
+
+  ' Check before approach
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto turned OFF before approach. Returning to HOME."
+    Return
+  End If
+
+  Approach P, P[DPLT_POS], @0 PLT_APR_LEN, S = 100
+  Move L, P[DPLT_POS], S = 40
+
+  ' Check after move to pick
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto interrupted during pick. Returning to HOME."
+    Return
+  End If
+
+  ' Pick bottle
+  Set IO64 = 1
+  Set IO65 = 0
+  Delay 500
+
+  ' Depart
+  Depart L, PLT_DEP_LEN, S = 40
+
+  ' Check before moving to drop-off
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto turned OFF before drop-off. Returning to HOME."
+    Return
+  End If
+
+  Approach P, P[DPLT_DROPOFF], PLT_APR_LEN, S = 100
+  Move L, @0 P[DPLT_DROPOFF], S = 40
+
+  ' Check again
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto interrupted before release. Returning to HOME."
+    Return
+  End If
+
+  ' Release bottle
+  Set IO64 = 0
+  Set IO65 = 1
+  Wait IO554 = 1
+  Delay 500
+  Depart L, PLT_DEP_LEN, S = 40
+
+  ' Debug message
+  PrintDbg "Layer: " & I[DPLT_LAYER_COUNTER] & ", Bottle: " & I[DPLT_COUNTER] + 1 & " pick complete"
+
+  ' Update counters
+  I[DPLT_COUNTER] = I[DPLT_COUNTER] + 1
+
+  If I[DPLT_COUNTER] >= PLT_ROWS * PLT_COLS Then
+    I[DPLT_COUNTER] = 0
+    I[DPLT_LAYER_COUNTER] = I[DPLT_LAYER_COUNTER] - 1
+
+    If I[DPLT_LAYER_COUNTER] < 1 Then
+      PrintDbg "De-palletizing complete. Restarting from top layer."
+      I[DPLT_LAYER_COUNTER] = PLT_LAYER
+    End If
+  End If
+
+End Sub
+
+Sub Palletizing_Main()
+
+  TakeArm Keep = 0
+
+  PrintDbg "Starting Palletizing sequence..."
+
+  ' ---- Move to pickup point ----
+  Approach P, P[PPLT_PICKUP], PLT_APR_LEN, S = 100
+  Move L, @0 P[PPLT_PICKUP], S = 40
+  PrintDbg "Arrived at pickup position."
+
+  ' ---- Wait for correct material based on current layer ----
+  If I[PPLT_LAYER_COUNTER] = 1 Then
+    Wait IO552 = 1   ' Wait for A-type bottle
+    PrintDbg "Bottle type A detected. Picking..."
+  Else
+    Wait IO553 = 1   ' Wait for B-type bottle
+    PrintDbg "Bottle type B detected. Picking..."
+  End If
+
+  ' ---- Pick bottle ----
+  Set IO64 = 0
+  Set IO65 = 1
+  Delay 1000
+  Depart L, PLT_DEP_LEN, S = 40
+  PrintDbg "Bottle picked successfully."
+
+  ' ---- Calculate current pallet position ----
+  P[PPLT_POS] = Pallet.CalcPos(PLT_ROWS, PLT_COLS, PLT_HEIGHT, P[PPLT_P1], P[PPLT_P2], P[PPLT_P3], P[PPLT_P4],I[PPLT_COUNTER], I[PPLT_LAYER_COUNTER])
+
+  ' ---- Move to pallet drop position ----
+  Approach P, P[PPLT_POS], PLT_APR_LEN, S = 100
+  Move L, @0 P[PPLT_POS], S = 40
+  PrintDbg "Arrived at pallet position."
+
+  ' ---- Place bottle ----
+  Set IO64 = 1
+  Set IO65 = 0
+  Delay 1000
+  Depart L, PLT_DEP_LEN, S = 40
+  PrintDbg "Bottle placed successfully."
+
+  PrintDbg "Palletizing - Layer " & I[PPLT_LAYER_COUNTER] & ", Bottle " & I[PPLT_COUNTER] + 1 & " placed."
+
+
+  ' ---- Update counters and switch layer if needed ----
+  I[PPLT_COUNTER] = I[PPLT_COUNTER] + 1
+
+  If I[PPLT_COUNTER] >= (PLT_ROWS * PLT_COLS) Then
+    I[PPLT_COUNTER] = 0
+
+    If I[PPLT_LAYER_COUNTER] = 1 Then
+      I[PPLT_LAYER_COUNTER] = 2
+      PrintDbg "Finished placing A-type bottles. Switching to B layer."
+    Else
+      I[PPLT_LAYER_COUNTER] = 1
+      PrintDbg "Finished placing all bottles (A+B). Starting new pallet."
+    End If
+  End If
+
+End Sub

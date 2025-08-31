@@ -1,0 +1,79 @@
+'!TITLE "De-Palletizing (2x2x2, Top-Down)"
+#Define PLT_ROWS 2
+#Define PLT_COLS 2
+#Define PLT_HEIGHT 20
+#Define PLT_APR_LEN 50
+#Define PLT_DEP_LEN 50
+#Define PLT_LAYER 2
+
+#Define PLT_P1 71
+#Define PLT_P2 72
+#Define PLT_P3 73
+#Define PLT_P4 74
+
+#Define PLT_POS 51
+#Define PLT_DROPOFF 75
+
+#Define PLT_COUNTER 30
+#Define PLT_LAYER_COUNTER 31
+#Define HOME P[10]
+' Additional signal from PLC (Boolean input)
+#Define FILLING_AUTO I[40]
+
+Sub Main()
+  TakeArm Keep = 0
+
+  ' Check if the FillingAuto signal is enabled before proceeding
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto is OFF. Returning to HOME."
+    Return
+  End If
+
+  ' --- Calculate current pallet position ---
+  P[PLT_POS] = Pallet.CalcPos(PLT_ROWS, PLT_COLS, PLT_HEIGHT,P[PLT_P1], P[PLT_P2], P[PLT_P3], P[PLT_P4], I[PLT_COUNTER], I[PLT_LAYER_COUNTER])
+
+  ' --- Move to pick position ---
+  Approach P, P[PLT_POS], @0 PLT_APR_LEN, S = 100
+  Move L, P[PLT_POS], S = 40
+
+  ' Check again if FillingAuto was interrupted
+  If I[FILLING_AUTO] = 0 Then
+    Move P, HOME
+    PrintDbg "FillingAuto interrupted during pick. Returning to HOME."
+    Return
+  End If
+
+  ' --- Pick up the bottle (Vacuum ON) ---
+  Set IO64 = 1
+  Set IO65 = 0
+  Delay 500
+  Depart L, PLT_DEP_LEN, S = 40
+
+  ' --- Move to drop-off position ---
+  Approach P, P[PLT_DROPOFF], PLT_APR_LEN, S = 100
+  Move L, @0 P[PLT_DROPOFF], S = 40
+
+  ' --- Release the bottle (Vacuum OFF) ---
+  Set IO64 = 0
+  Set IO65 = 1
+  Wait IO554 = 1 ' Wait for sensor confirmation
+  Delay 500
+  Depart L, PLT_DEP_LEN, S = 40
+  ' --- Print debug message with current layer and bottle number ---
+  PrintDbg "Layer: " & I[PLT_LAYER_COUNTER] & ", Bottle: " & I[PLT_COUNTER] + 1 & " pick complete"
+
+  ' --- Update counters for next bottle ---
+  I[PLT_COUNTER] = I[PLT_COUNTER] + 1
+
+  If I[PLT_COUNTER] >= PLT_ROWS * PLT_COLS Then
+    I[PLT_COUNTER] = 0
+    I[PLT_LAYER_COUNTER] = I[PLT_LAYER_COUNTER] - 1
+
+    If I[PLT_LAYER_COUNTER] < 1 Then
+      PrintDbg "De-palletizing complete. Restarting from top layer."
+      I[PLT_LAYER_COUNTER] = PLT_LAYER
+    End If
+  End If
+
+End Sub
