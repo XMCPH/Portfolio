@@ -1,0 +1,151 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="BoxAccum" Id="{8601a35b-c8df-4cae-914b-300368cf0e68}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK BoxAccum
+VAR_INPUT
+    PallReflexCnt_NC : BOOL;   // Counting sensor: box front edge (NC type)
+    PallPushLim      : BOOL;   // M040 pusher limit switch: Home=TRUE, Away=FALSE
+    PallPlateLim_NC  : BOOL;   // M060 plate lower limit (NC, triggers at end of stroke)
+    PallClamped      : BOOL;   // Clamp feedback signal
+END_VAR
+
+VAR_OUTPUT
+END_VAR
+
+VAR
+    // Edge detection and counting 
+    fBox       : F_TRIG;       // Box front edge (falling edge of NC sensor)
+    CntBox     : CTU;          // Counter for boxes
+    resetCnt   : BOOL;         // One-shot reset signal for counter
+
+    // M040 pusher limits
+    rPushLim   : R_TRIG;       // FALSE→TRUE : back to Home
+    fPushLim   : F_TRIG;       // TRUE→FALSE : leaving Home
+
+    // M060 plate lower limit 
+    rPallPlateLim : R_TRIG;    // TRUE→FALSE (NC falling edge): plate reached open position
+
+    // Timers
+    tDelay     : TON;          // Tail-overrun delay after box arrival
+    tHold      : TON;          // Hold timer for settling or confirmation
+
+    // Phase control and target tracking
+    eBP        : Box_Phase;    // Current phase/state of box accumulation process
+    nextTarget : INT;          // Next counting target (e.g., 2 → 4 → 6)
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Defaults 
+gvl.req_M010_CONV_Entry        := FALSE;
+gvl.req_M020_CONV_Incl         := FALSE;
+gvl.req_M031_CONV_PalBelt_FWD  := FALSE;
+gvl.req_M040_ARM_PalPush       := FALSE;
+gvl.req_M050_CLAMP_Pal_B       := FALSE;
+gvl.req_M060_PLATE_Pal_B       := FALSE;
+resetCnt                       := FALSE;
+
+// Edge detection and counting 
+fBox(CLK := PallReflexCnt_NC);
+
+// M040 pusher (uses PallPushLim only)
+rPushLim(CLK := PallPushLim);           // Back to Home (FALSE→TRUE)
+fPushLim(CLK := PallPushLim);           // Leaving Home (TRUE→FALSE)
+
+// M060 plate (uses PallPlateLim_NC only)
+rPallPlateLim(CLK := PallPlateLim_NC);  // Open limit reached (NC falling edge)
+
+// Delay timers
+tDelay(IN := (eBP = Box_Phase.Delay), PT := T#1S200MS);
+tHold (IN := (eBP = Box_Phase.Hold),  PT := T#200MS);  
+
+// Phases
+CASE eBP OF
+
+    // S0: Start of a new layer
+    Box_Phase.Start:
+        IF gvl.bRunning 
+           AND NOT gvl.req_M050_CLAMP_Pal 
+           AND NOT gvl.req_M060_PLATE_Pal THEN
+            nextTarget := 2;           // Target sequence: 2 → 4 → 6
+            resetCnt   := TRUE;        // Reset box counter for new layer
+            eBP        := Box_Phase.Run;
+        END_IF;
+
+    // S1: Feeding boxes until target count is reached
+    Box_Phase.Run:
+        gvl.req_M010_CONV_Entry       := TRUE;
+        gvl.req_M020_CONV_Incl        := TRUE;
+        gvl.req_M031_CONV_PalBelt_FWD := TRUE;
+
+        IF CntBox.CV >= nextTarget THEN
+            eBP := Box_Phase.Delay;    // Short overrun for box tail
+        END_IF;
+
+    // S2: Overrun delay (keep conveyors running briefly)
+    Box_Phase.Delay:
+        gvl.req_M010_CONV_Entry       := TRUE;
+        gvl.req_M020_CONV_Incl        := TRUE;
+        gvl.req_M031_CONV_PalBelt_FWD := TRUE;
+
+        IF tDelay.Q THEN
+            eBP := Box_Phase.PushFall; // Proceed to pusher sequence
+        END_IF;
+
+    // S3: Pusher extending – wait for “leaving Home” (TRUE→FALSE, fPushLim)
+    Box_Phase.PushFall:
+        gvl.req_M040_ARM_PalPush := TRUE;     
+        IF fPushLim.Q THEN
+            eBP := Box_Phase.PushRise; // Begin monitoring return
+        END_IF;
+
+    // S4: Pusher retracting – wait for “back to Home” (FALSE→TRUE, rPushLim)
+    Box_Phase.PushRise:
+        gvl.req_M040_ARM_PalPush := TRUE;     
+        IF rPushLim.Q THEN
+            eBP := Box_Phase.TargetCheck;
+        END_IF;
+
+    // S5: Target check
+    Box_Phase.TargetCheck:
+        gvl.req_M040_ARM_PalPush := FALSE;     
+        IF nextTarget < 6 THEN
+            nextTarget := nextTarget + 2;      // Continue with 2 → 4 → 6
+            eBP        := Box_Phase.Run;
+        ELSE
+            eBP        := Box_Phase.Clamp;     // After 6 boxes → clamp pallet
+        END_IF;
+
+    // S6: Clamp — Clamp pallet and wait until upstream is ready
+    Box_Phase.Clamp:
+        gvl.req_M050_CLAMP_Pal_B := TRUE;      // Keep pallet clamped
+        // Ensure pusher is at Home and conveyors stopped
+        IF PallClamped 
+           AND (gvl.ePal_Phase = Pal_Phase.Ready_for_Boxes) THEN
+            eBP := Box_Phase.Drop;
+        END_IF;
+
+    // S7: Drop — lower plate after clamping
+    Box_Phase.Drop:
+        gvl.req_M050_CLAMP_Pal_B := TRUE;
+        gvl.req_M060_PLATE_Pal_B := TRUE;   
+        IF rPallPlateLim.Q THEN
+            eBP := Box_Phase.Hold;             // Enter Hold phase 
+        END_IF;
+
+    // S8: Hold — short delay to absorb vibration
+    Box_Phase.Hold:
+        gvl.req_M050_CLAMP_Pal_B := TRUE;
+        gvl.req_M060_PLATE_Pal_B := TRUE; 
+        // Plate drive already off; maintain position for 1s
+        IF tHold.Q THEN
+            eBP := Box_Phase.Start;            // Return to Start for next layer
+            gvl.ePal_Phase := Pal_Phase.Box_Loaded;
+            gvl.bLayCheck  := TRUE;            // Mark current layer as completed
+        END_IF;
+END_CASE;
+
+// Box counter (counts only when running)
+CntBox(CU := fBox.Q, RESET := resetCnt, PV := 6);]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

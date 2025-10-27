@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<TcLicenseInfo xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="http://www.beckhoff.com/schemas/2011/11/TcLicenseInfo">
+	<LicenseInfo>
+		<SystemId>{CA0DA57A-C274-91BC-5ADC-CFFC14280809}</SystemId>
+		<IssueTime>2025-10-23T09:47:00</IssueTime>
+		<ExpireTime>2025-10-31T00:00:00</ExpireTime>
+		<LicenseKey>988c29bee53bec387eec791392cc7a10301a6041a4c5fe12b2247fa2a622af4a53aa1307c2572ff0252f7c0c26b2fd2d591e14e3e7706633a06d8136d124c66be2d531de964d52b764f27f2c4a2074a112c38bca589e6a7c73d50396e0559cfe481a3889845d7d7ee00fe105ceb5e1ec455faad0b7d81d2d72cca55ae30d4875e88f66e6d53ab788114c7aa672d5833678992bbf0039d649fdc0875e0ada8b6dfaa0b982857f5d1e0b015e87d2f6f3ab25c12e792ca997aff3e961930ea7ffe26bc033a2ef32cda7d1191c719a7972906671e09ce6e350d5f9da76e2c853d842ebef96763fda923553ebebe517ba010e9ea0ebfe8cece3b2bdd99bc86f0928e3</LicenseKey>
+		<License>
+			<LicenseId>{CC0BCBD5-3EA7-D7D4-4C71-A8B125F0DB72}</LicenseId>
+			<Name>TC3 OPC-UA Analytics Read</Name>
+		</License>
+		<License>
+			<LicenseId>{C2B7B285-EBD7-72CF-843F-15F95A86FEEE}</LicenseId>
+			<Name>TC3 OPC-UA Analytics Write</Name>
+		</License>
+		<License>
+			<LicenseId>{BDCC0070-42D5-49AE-ABF1-1D4434813D60}</LicenseId>
+			<Name>TC3 OPC-UA</Name>
+			<OrderNo>TF6100</OrderNo>
+		</License>
+		<License>
+			<LicenseId>{4C256767-E6E6-4AF5-BD68-9F7ABAD0C200}</LicenseId>
+			<Name>TC3 ADS</Name>
+			<OrderNo>TC1000</OrderNo>
+		</License>
+		<License>
+			<LicenseId>{66689887-CCBD-452C-AC9A-039D997C6E66}</LicenseId>
+			<Name>TC3 PLC</Name>
+			<OrderNo>TC1200</OrderNo>
+		</License>
+		<License>
+			<LicenseId>{3FF18E97-7754-401B-93FB-70544DE28A13}</LicenseId>
+			<Name>TC3 IO</Name>
+			<OrderNo>TC1100</OrderNo>
+		</License>
+	</LicenseInfo>
+</TcLicenseInfo>

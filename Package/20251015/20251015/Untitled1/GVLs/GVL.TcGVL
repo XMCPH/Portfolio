@@ -1,0 +1,46 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <GVL Name="GVL" Id="{3e02dc5a-9a44-4500-906f-dacf0a3a834e}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+VAR_GLOBAL
+    // Runtime State
+    ePal_Phase              : Pal_Phase;  // Pallet machine phase
+    bRunning                : BOOL;       // Line is running
+    bFinishing              : BOOL;       // Graceful stop in progress
+    bLayCheck               : BOOL;
+
+    // Actuator Requests (to be AND-masked with bEnable before FIO outputs)
+    // Conveyors & Belts 
+    req_M010_CONV_Entry        : BOOL;
+    req_M020_CONV_Incl         : BOOL;
+    req_M031_CONV_PalBelt_FWD  : BOOL;
+    req_M032_CONV_PalBelt_BCK  : BOOL;
+    req_M080_CONV_Roll         : BOOL;
+    req_M100_CONV_Exit         : BOOL;
+
+    // Pusher / Turn / Clamp / Plate 
+    req_M040_ARM_PalPush       : BOOL;
+    req_M041_ARM_PalTurn       : BOOL;
+    req_M050_CLAMP_Pal         : BOOL;	
+    req_M050_CLAMP_Pal_B       : BOOL;
+    req_M050_CLAMP_Pal_L       : BOOL;	
+    req_M060_PLATE_Pal         : BOOL;     
+    req_M060_PLATE_Pal_B       : BOOL;
+    req_M060_PLATE_Pal_L       : BOOL;	
+
+    // Elevator 
+    req_M071_ELEV_Pal_UP       : BOOL;
+    req_M072_ELEV_Pal_DOWN     : BOOL;
+    req_M073_ELEV_Pal_M2LIM    : BOOL;  	
+    req_M073_ELEV2TOP          : BOOL;   // move elevator to TOP 
+    req_M073_ELEV2Bottom       : BOOL;   // move elevator to BOTTOM 
+
+    // Pallet Chain
+    req_M091_CONV_PalChain_FWD : BOOL;
+
+    // Light
+    req_P060_Light_SPPlus      : BOOL;   // Stack light: SP+
+    req_P070_Light_SPMinus     : BOOL;   // Stack light: SP-
+END_VAR]]></Declaration>
+  </GVL>
+</TcPlcObject>

@@ -1,0 +1,118 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="LayerPlace" Id="{55d12f30-07bb-4800-95e7-ca4977b2f364}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK LayerPlace
+VAR_INPUT
+    LaySP_PLUS   : BOOL;
+    LaySP_MINUS  : BOOL;
+    PallElvMov   : BOOL;
+END_VAR
+
+VAR_OUTPUT
+    iLaySP       : INT := 1;
+    iLayCur      : INT := 1;
+	END_VAR
+VAR
+    rPlus        : R_TRIG;
+    rMinus       : R_TRIG;
+    rLayCheck    : R_TRIG;
+    fPallElvMov  : F_TRIG;
+    diff         : INT;
+    eLP          : Lay_Phase;
+    tHold        : TON;
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Edge detection 
+rPlus       (CLK := LaySP_PLUS);          // Rising edge of SP+ button (increment once per press)
+rMinus      (CLK := LaySP_MINUS);         // Rising edge of SP- button (decrement once per press)
+fPallElvMov (CLK := PallElvMov);          // Falling edge: elevator just stopped (motion->stop)
+rLayCheck   (CLK := gvl.bLayCheck);       // Rising edge: trigger for layer-check sequence
+
+// Setpoint editing (range 1..10) 
+IF rPlus.Q  AND (iLaySP < 10) THEN 
+	iLaySP := iLaySP + 1; 
+	gvl.req_P060_Light_SPPlus := TRUE;     // Pulse indicator for SP+
+ELSE 	gvl.req_P060_Light_SPPlus := FALSE; // Otherwise keep indicator off
+END_IF;
+
+IF rMinus.Q AND (iLaySP > 1)  THEN
+	iLaySP := iLaySP - 1;
+	gvl.req_P070_Light_SPMinus := TRUE;    // Pulse indicator for SP- 
+ELSE 	gvl.req_P070_Light_SPMinus  := FALSE;
+END_IF;
+
+// Defensive clamp for current layer (1..10)
+IF iLayCur < 1 THEN
+    iLayCur := 1;                          // Clamp lower bound
+ELSIF iLayCur > 10 THEN
+    iLayCur := 10;                         // Clamp upper bound
+END_IF;
+
+// Diff & finishing policy 
+diff := iLaySP - iLayCur;                  // Positive => more layers needed
+IF gvl.bFinishing THEN
+    diff := 0;                             // In finishing mode, force “go to bottom” path
+END_IF;
+
+// Defaults 
+gvl.req_M072_ELEV_Pal_DOWN := FALSE;       // Elevator down request (default off)
+gvl.req_M073_ELEV2Bottom   := FALSE;       // “Move to bottom limit” request (default off)
+gvl.req_M050_CLAMP_Pal_L   := FALSE;       // Left clamp (default off)
+gvl.req_M060_PLATE_Pal_L   := FALSE;       // Left plate support (default off)
+
+// Hold timer: active only during LayCheck to allow settling/debounce
+tHold(IN := (elP = Lay_Phase.Laycheck),      PT := T#500MS);
+
+CASE eLP OF
+    Lay_Phase.Start:
+        IF rLayCheck.Q THEN
+            eLP := Lay_Phase.Down;             // Enter descent preparation
+            gvl.bLayCheck := FALSE;            // Reset external trigger to avoid retrigger
+        END_IF;
+
+    Lay_Phase.Down:
+		gvl.req_M050_CLAMP_Pal_L   := TRUE;    // Clamp pallet to reduce wobble
+		gvl.req_M060_PLATE_Pal_L   := TRUE;    // Lower plate to support
+        gvl.req_M072_ELEV_Pal_DOWN := TRUE;    // Request elevator down
+        IF fPallElvMov.Q THEN                  // Elevator just stopped (arrived)
+            eLP := Lay_Phase.Laycheck;         // Proceed to settle/check
+   			gvl.ePal_Phase := Pal_Phase.Ready_for_Boxes;   // Allow box infeed on upper level
+        END_IF;
+
+    Lay_Phase.Laycheck:
+	
+		IF tHold.Q THEN                        // After 500 ms settle time
+			  IF diff = 0 THEN
+					eLP := Lay_Phase.ElvLim;     // No remaining layers → go to bottom for dispatch
+				ELSE
+					eLP := Lay_Phase.Start;     // Still need layers → descend one more layer
+					iLayCur := iLayCur + 1;
+			  END_IF;
+		 END_IF;
+	  
+	Lay_Phase.ElvLim:
+        gvl.req_M072_ELEV_Pal_DOWN := TRUE;    // Keep moving down
+        gvl.req_M073_ELEV2Bottom   := TRUE;    // Command “move to bottom limit”
+        IF fPallElvMov.Q THEN                  // Reached bottom (stopped)
+            eLP := Lay_Phase.ElvDone;          // Ready for dispatch
+        END_IF;
+
+
+
+    Lay_Phase.ElvDone:
+        gvl.ePal_Phase := Pal_Phase.Ready_for_Disp; // Elevator ready to dispatch pallet
+        iLayCur := 1;                                // Reset current layer for next cycle
+        eLP := Lay_Phase.Start;                      // Wait for next trigger
+
+ELSE// Safety fallback: ensure all requests are off
+    gvl.req_M072_ELEV_Pal_DOWN := FALSE;    
+    gvl.req_M073_ELEV2Bottom   := FALSE;
+	gvl.req_M050_CLAMP_Pal_L   := FALSE;
+	gvl.req_M060_PLATE_Pal_L   := FALSE;
+    eLP := Lay_Phase.Start;                 // Return to start
+END_CASE;
+
+]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

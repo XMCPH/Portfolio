@@ -1,0 +1,180 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="MAIN" Id="{af85f07d-98f2-4888-8b94-bcc6b254221e}" SpecialFunc="None">
+    <Declaration><![CDATA[PROGRAM MAIN
+VAR
+    // ACTUATORS (Outputs to field)
+    FIO_M010_CONV_Entry          : BOOL;
+    FIO_M020_CONV_Incl           : BOOL;
+    FIO_M031_CONV_PalBelt_FWD    : BOOL;
+    FIO_M032_CONV_PalBelt_BCK    : BOOL;
+    FIO_M040_ARM_PalPush         : BOOL;
+    FIO_M050_CLAMP_Pal           : BOOL;
+    FIO_M060_PLATE_Pal           : BOOL;
+    FIO_M071_ELEV_Pal_UP         : BOOL;
+    FIO_M072_ELEV_Pal_DOWN       : BOOL;
+    FIO_M073_ELEV_Pal_M2LIM      : BOOL;
+    FIO_M080_CONV_Roll           : BOOL;
+    FIO_M091_CONV_PalChain_FWD   : BOOL;
+    FIO_M100_CONV_Exit           : BOOL;
+
+    // SENSORS (Inputs from field)
+    FIO_B010_PallClamped         : BOOL;        // Clamp sensor
+    FIO_B020_PallPlateLim        : BOOL := TRUE; // NC: Plate limit (healthy=TRUE)
+    FIO_B030_PallPushLim         : BOOL := TRUE; // NC: Pusher home limit (healthy=TRUE)
+    FIO_B040_PallElvMov          : BOOL;        // Elevator motion status
+    FIO_B050_PallElvFrLim        : BOOL;        // Elevator front/top limit
+    FIO_B060_PallElvBckLim       : BOOL;        // Elevator back/bottom limit
+    FIO_B070_PallReflexCnt       : BOOL := TRUE; // NC: Box counter reflex (healthy=TRUE)
+
+    // BUTTONS 
+    FIO_S100_EStop               : BOOL := TRUE; // NC: Emergency stop (healthy=TRUE)
+    FIO_S010_Start               : BOOL;         // Start push button
+    FIO_S020_Stop                : BOOL := TRUE; // NC: Stop push button (healthy=TRUE)
+    FIO_S040_IN_LaySP_PLUS       : BOOL;         // HMI: Layer SP +
+    FIO_S050_IN_LaySP_MINUS      : BOOL;         // HMI: Layer SP -
+
+    // DISPLAYS / PROCESS VALUES (to HMI)
+    // Consider RETAIN/PERSISTENT for setpoints if needed across reboots.
+    FIO_P010_iPallID             : INT  := 0;   // Pallet ID
+    FIO_P020_iLayCur             : INT  := 1;   // Current layer (1..10)
+    FIO_P030_iLaySP              : INT  := 1;   // Layer setpoint (1..10)
+    FIO_P040_Light_Start         : BOOL;        // Stack light: Start
+    FIO_P050_Light_Stop          : BOOL;        // Stack light: Stop
+    FIO_P060_Light_SPPlus        : BOOL;        // Stack light: SP+
+    FIO_P070_Light_SPMinus       : BOOL;        // Stack light: SP-
+
+    // FUNCTION BLOCK INSTANCES
+    fbPallet		             : Pallet;
+    fbBoxAccum                   : BoxAccum;
+    fbLayerPlace                 : LayerPlace;
+
+
+	// EDGE DETECTORS / LATCHES / FLAGS
+    rStart                       : R_TRIG;      // Rising-edge detector for Start
+    fStop                        : F_TRIG;      // Falling-edge detector for Stop
+    fRunFall                     : F_TRIG;      // Falling-edge detector for bRunning
+    srRunning                    : SR;          // Set/Reset latch for running state
+    bEstopActive                 : BOOL;        // TRUE when Estop is active
+END_VAR]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Structure: Safety → FBs → State → Requests → Actuators + Light
+
+// SAFETY & RUN CONTROL
+// Emergency stop
+bEstopActive := NOT FIO_S100_EStop;     // TRUE = Estop pressed
+
+// Start / Stop edge detection
+rStart(CLK := FIO_S010_Start);
+fStop (CLK := FIO_S020_Stop);
+
+// SR latch for Running status
+srRunning(
+    SET1  := rStart.Q AND NOT bEstopActive,
+    RESET := fStop.Q
+);
+
+// Running / Finishing flags 
+IF srRunning.Q1 THEN
+    gvl.bRunning   := TRUE;             // Enter RUN
+    gvl.bFinishing := FALSE;            // Reset finishing
+ELSE
+    gvl.bRunning := FALSE;
+END_IF
+
+// Detect normal stop (falling edge of Running) 
+fRunFall(CLK := gvl.bRunning);
+IF (NOT bEstopActive) AND fRunFall.Q THEN
+    gvl.bFinishing := TRUE;             // Controlled stop sequence
+END_IF
+
+//Estop clears finishing immediately
+IF bEstopActive THEN
+    gvl.bFinishing := FALSE;
+END_IF
+
+// FUNCTION BLOCK CALLS
+
+fbPallet(
+    PallElvFrLim := FIO_B050_PallElvFrLim,
+    PallElvBckLim:= FIO_B060_PallElvBckLim,
+    PallElvMov   := FIO_B040_PallElvMov,
+    iPallID      => FIO_P010_iPallID
+);
+
+fbBoxAccum(
+    PallClamped      := FIO_B010_PallClamped,
+    PallPlateLim_NC  := FIO_B020_PallPlateLim,
+    PallPushLim      := FIO_B030_PallPushLim,
+    PallReflexCnt_NC := FIO_B070_PallReflexCnt
+);
+
+fbLayerPlace(
+    LaySP_PLUS       := FIO_S040_IN_LaySP_PLUS,
+    LaySP_MINUS      := FIO_S050_IN_LaySP_MINUS,
+    PallElvMov       := FIO_B040_PallElvMov,
+    iLaySP           => FIO_P030_iLaySP,
+    iLayCur          => FIO_P020_iLayCur
+);
+
+// STATE → REQUESTS
+// Translate pallet phase into actuator requests
+CASE gvl.ePal_Phase OF
+
+    Pal_Phase.Loaded:
+        gvl.req_M073_ELEV_Pal_M2LIM := gvl.req_M073_ELEV2TOP;
+
+    Pal_Phase.Ready_for_Boxes:
+        gvl.req_M073_ELEV_Pal_M2LIM := gvl.req_M073_ELEV2Bottom;
+        gvl.req_M050_CLAMP_Pal      := gvl.req_M050_CLAMP_Pal_B;
+        gvl.req_M060_PLATE_Pal      := gvl.req_M050_CLAMP_Pal_B;
+
+    Pal_Phase.Box_Loaded:
+        gvl.req_M050_CLAMP_Pal      := gvl.req_M050_CLAMP_Pal_L;
+        gvl.req_M060_PLATE_Pal      := gvl.req_M050_CLAMP_Pal_L;
+
+ELSE
+    gvl.req_M073_ELEV_Pal_M2LIM    := FALSE;
+    gvl.req_M050_CLAMP_Pal         := FALSE;
+    gvl.req_M060_PLATE_Pal         := FALSE;
+END_CASE;
+
+// REQUESTS → ACTUATORS
+// Reset all outputs (avoid stale signals)
+FIO_M010_CONV_Entry        := FALSE;
+FIO_M020_CONV_Incl         := FALSE;
+FIO_M031_CONV_PalBelt_FWD  := FALSE;
+FIO_M032_CONV_PalBelt_BCK  := FALSE;
+FIO_M040_ARM_PalPush       := FALSE;
+FIO_M050_CLAMP_Pal         := FALSE;
+FIO_M060_PLATE_Pal         := FALSE;
+FIO_M071_ELEV_Pal_UP       := FALSE;
+FIO_M072_ELEV_Pal_DOWN     := FALSE;
+FIO_M073_ELEV_Pal_M2LIM    := FALSE;
+FIO_M080_CONV_Roll         := FALSE;
+FIO_M091_CONV_PalChain_FWD := FALSE;
+FIO_M100_CONV_Exit         := FALSE;
+
+// Map all requests to outputs (with Estop interlock)
+FIO_M010_CONV_Entry        := gvl.req_M010_CONV_Entry        AND NOT bEstopActive;
+FIO_M020_CONV_Incl         := gvl.req_M020_CONV_Incl         AND NOT bEstopActive;
+FIO_M031_CONV_PalBelt_FWD  := gvl.req_M031_CONV_PalBelt_FWD  AND NOT bEstopActive;
+FIO_M032_CONV_PalBelt_BCK  := gvl.req_M032_CONV_PalBelt_BCK  AND NOT bEstopActive;
+FIO_M040_ARM_PalPush       := gvl.req_M040_ARM_PalPush       AND NOT bEstopActive;
+FIO_M050_CLAMP_Pal         := gvl.req_M050_CLAMP_Pal         AND NOT bEstopActive;
+FIO_M060_PLATE_Pal         := gvl.req_M060_PLATE_Pal         AND NOT bEstopActive;
+FIO_M071_ELEV_Pal_UP       := gvl.req_M071_ELEV_Pal_UP       AND NOT bEstopActive;
+FIO_M072_ELEV_Pal_DOWN     := gvl.req_M072_ELEV_Pal_DOWN     AND NOT bEstopActive;
+FIO_M080_CONV_Roll         := gvl.req_M080_CONV_Roll         AND NOT bEstopActive;
+FIO_M091_CONV_PalChain_FWD := gvl.req_M091_CONV_PalChain_FWD AND NOT bEstopActive;
+FIO_M100_CONV_Exit         := gvl.req_M100_CONV_Exit         AND NOT bEstopActive;
+FIO_M073_ELEV_Pal_M2LIM    := gvl.req_M073_ELEV_Pal_M2LIM    AND NOT bEstopActive;
+
+// Light
+FIO_P040_Light_Start       := srRunning.Q1;
+FIO_P050_Light_Stop        := gvl.bFinishing;
+FIO_P060_Light_SPPlus      := gvl.req_P060_Light_SPPlus;
+FIO_P070_Light_SPMinus     := gvl.req_P070_Light_SPMinus;]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

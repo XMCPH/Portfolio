@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="Lay_Phase" Id="{d2e9abc9-5473-4edc-9eeb-c6ce1dfa30a6}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE Lay_Phase :
+(
+	Start,Down, LayCheck, ElvLim, ElvNex, ElvDone
+):=Start;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>

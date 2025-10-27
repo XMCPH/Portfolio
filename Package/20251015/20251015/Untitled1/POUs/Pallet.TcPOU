@@ -1,0 +1,124 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <POU Name="Pallet" Id="{09d91443-4553-4f7e-9ab9-0ba46f88cc0f}" SpecialFunc="None">
+    <Declaration><![CDATA[FUNCTION_BLOCK Pallet
+VAR_INPUT
+    // Sensors 
+    PallElvFrLim   : BOOL;   // Front limit switch
+    PallElvBckLim  : BOOL;   // Back limit switch
+    PallElvMov     : BOOL;   // Elevator in motion (TRUE while moving)
+END_VAR
+
+VAR_OUTPUT
+    iPallID        : INT := 0;
+END_VAR
+
+VAR
+    // Edge detectors
+    rPallElvBckLim : R_TRIG;
+    rPallElvFrLim  : R_TRIG;
+    fPallElvMov    : F_TRIG;
+    fPallElvFrLim  : F_TRIG;
+
+    // Latches (SR)
+    srCONV_Roll         : SR;
+    srCONV_PalChain_FWD : SR;
+    srELEV_Pal_UP       : SR;
+END_VAR
+]]></Declaration>
+    <Implementation>
+      <ST><![CDATA[// Edge detection 
+rPallElvBckLim (CLK := PallElvBckLim);   // rising: pallet tail hits back limit
+rPallElvFrLim  (CLK := PallElvFrLim);    // rising: pallet head hits front limit
+fPallElvMov    (CLK := PallElvMov);      // falling: elevator motion stopped
+fPallElvFrLim  (CLK := PallElvFrLim);    // falling: pallet clears front
+
+// Safe defaults each scan
+gvl.req_M080_CONV_Roll         := FALSE;
+gvl.req_M091_CONV_PalChain_FWD := FALSE;    
+gvl.req_M071_ELEV_Pal_UP       := FALSE;
+gvl.req_M073_ELEV2TOP          := FALSE;
+gvl.req_M073_ELEV_Pal_M2LIM    := FALSE;
+gvl.req_M100_CONV_Exit         := FALSE;
+
+CASE gvl.ePal_Phase OF
+
+    // idle → load pallet
+    Pal_Phase.idle:
+
+        // Roller runs while no limits; stop on front-limit rising or stop command
+        srCONV_Roll(
+            SET1  := gvl.bRunning AND (NOT PallElvFrLim) AND (NOT PallElvBckLim),
+            RESET := rPallElvFrLim.Q
+        );
+        gvl.req_M080_CONV_Roll := srCONV_Roll.Q1;
+        gvl.req_M100_CONV_Exit := srCONV_Roll.Q1;
+
+        // Chain IN: start when back-limit is hit; stop on front-limit rising or stop
+        srCONV_PalChain_FWD(
+            SET1  := rPallElvBckLim.Q,
+            RESET := rPallElvFrLim.Q
+        );
+        gvl.req_M091_CONV_PalChain_FWD := srCONV_PalChain_FWD.Q1;
+
+        // Pallet ID
+        IF rPallElvBckLim.Q THEN 
+            iPallID := iPallID + 10;
+        END_IF
+
+        // Transition to Loaded when both limits are TRUE
+        IF PallElvFrLim AND PallElvBckLim THEN
+            gvl.ePal_Phase := Pal_Phase.Loaded;
+        END_IF
+
+    // Loaded → move elevator up to the top
+    Pal_Phase.Loaded:
+
+        // Latch UP; reset when motion stops (reached top) or stop command
+        srELEV_Pal_UP(
+            SET1  := TRUE,       
+            RESET := fPallElvMov.Q
+        );
+        gvl.req_M071_ELEV_Pal_UP := srELEV_Pal_UP.Q1;
+        gvl.req_M073_ELEV2TOP    := srELEV_Pal_UP.Q1;   // same intent signal
+
+        // When motion stops, elevator is at top
+        IF fPallElvMov.Q THEN
+            gvl.ePal_Phase := Pal_Phase.Ready_for_Boxes;
+        END_IF
+
+    // Ready_for_Boxes (no motion here)
+    Pal_Phase.Ready_for_Boxes:
+        // intentionally no actuator here
+
+    // Ready_for_Disp → dispatch pallet out of the cell
+    // (Phase entry is decided by the box sequence)
+    Pal_Phase.Ready_for_Disp:
+
+        // Run exit + chain only while Running
+        IF gvl.bRunning THEN
+            gvl.req_M100_CONV_Exit         := TRUE;
+            gvl.req_M091_CONV_PalChain_FWD := TRUE;
+            IF fPallElvFrLim.Q THEN
+                gvl.ePal_Phase := Pal_Phase.idle;				
+            END_IF
+        ELSE	
+            gvl.ePal_Phase := Pal_Phase.Paused;	
+        END_IF
+
+    Pal_Phase.Paused:
+        IF gvl.bRunning THEN
+            gvl.ePal_Phase := Pal_Phase.Ready_for_Disp;
+        END_IF
+
+ELSE
+    gvl.req_M080_CONV_Roll         := FALSE;
+    gvl.req_M091_CONV_PalChain_FWD := FALSE;    
+    gvl.req_M071_ELEV_Pal_UP       := FALSE;
+    gvl.req_M073_ELEV2TOP          := FALSE;
+    gvl.req_M100_CONV_Exit         := FALSE;
+
+END_CASE]]></ST>
+    </Implementation>
+  </POU>
+</TcPlcObject>

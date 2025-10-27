@@ -1,0 +1,14 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<TcPlcObject Version="1.1.0.1">
+  <DUT Name="Pal_Phase" Id="{595f3a90-a6fa-4f04-8013-6301149d707d}">
+    <Declaration><![CDATA[{attribute 'qualified_only'}
+{attribute 'strict'}
+{attribute 'to_string'}
+TYPE Pal_Phase :
+(
+	idle, Loaded, Ready_for_Boxes, Box_Loaded, Ready_for_Disp, Paused
+) :=idle;
+END_TYPE
+]]></Declaration>
+  </DUT>
+</TcPlcObject>
